@@ -1,41 +1,111 @@
 package com.expensetracker.config;
+
 import com.expensetracker.security.JwtFilter;
 import lombok.RequiredArgsConstructor;
-import org.springframework.context.annotation.*;
-import org.springframework.security.config.Customizer;
-import org.springframework.web.cors.*;
-import java.util.List;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-@Configuration @RequiredArgsConstructor
+
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.Arrays;
+import java.util.List;
+
+@Configuration
+@RequiredArgsConstructor
 public class SecurityConfig {
+
     private final JwtFilter jwtFilter;
-    @Bean public PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(); }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
     @Bean
     public SecurityFilterChain chain(HttpSecurity http) throws Exception {
-        http.cors(Customizer.withDefaults()).csrf(c -> c.disable())
-            .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .authorizeHttpRequests(a -> a.requestMatchers("/api/auth/**").permitAll()
-                    .requestMatchers("/api/**").authenticated().anyRequest().permitAll())
-            .exceptionHandling(e -> e.authenticationEntryPoint((rq, rs, ex) -> {
-                rs.setStatus(401); rs.setContentType("application/json");
-                rs.getWriter().write("{\"status\":401,\"message\":\"Unauthorized\"}");
-            }))
-            .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+
+        http
+            .cors(cors -> cors.configurationSource(corsSource()))
+            .csrf(csrf -> csrf.disable())
+
+            .sessionManagement(session ->
+                session.sessionCreationPolicy(
+                    SessionCreationPolicy.STATELESS
+                )
+            )
+
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                .requestMatchers("/api/auth/**").permitAll()
+                .requestMatchers("/api/**").authenticated()
+                .anyRequest().permitAll()
+            )
+
+            .exceptionHandling(ex -> ex
+                .authenticationEntryPoint((request, response, exception) -> {
+                    response.setStatus(401);
+                    response.setContentType("application/json");
+                    response.getWriter().write(
+                        "{\"status\":401,\"message\":\"Unauthorized\"}"
+                    );
+                })
+            )
+
+            .addFilterBefore(
+                jwtFilter,
+                UsernamePasswordAuthenticationFilter.class
+            );
+
         return http.build();
     }
+
     @Bean
     public CorsConfigurationSource corsSource() {
-        CorsConfiguration c = new CorsConfiguration();
-        c.setAllowedOriginPatterns(List.of(System.getenv().getOrDefault("FRONTEND_URL", "http://localhost:5173").split(",")));
-        c.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        c.setAllowedHeaders(List.of("*"));
-        UrlBasedCorsConfigurationSource src = new UrlBasedCorsConfigurationSource();
-        src.registerCorsConfiguration("/api/**", c);
-        return src;
+
+        CorsConfiguration config = new CorsConfiguration();
+
+        String frontendUrls = System.getenv().getOrDefault(
+            "FRONTEND_URL",
+            "http://localhost:5173"
+        );
+
+        config.setAllowedOrigins(
+            Arrays.stream(frontendUrls.split(","))
+                .map(String::trim)
+                .filter(url -> !url.isEmpty())
+                .toList()
+        );
+
+        config.setAllowedMethods(
+            List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
+        );
+
+        config.setAllowedHeaders(
+            List.of("Authorization", "Content-Type", "Accept")
+        );
+
+        config.setExposedHeaders(
+            List.of("Authorization")
+        );
+
+        config.setAllowCredentials(false);
+        config.setMaxAge(3600L);
+
+        UrlBasedCorsConfigurationSource source =
+            new UrlBasedCorsConfigurationSource();
+
+        source.registerCorsConfiguration("/api/**", config);
+
+        return source;
     }
 }
